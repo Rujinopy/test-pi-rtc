@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include",
+                "/usr/local/include",
+                "/usr/include/libcamera/**",
+                "/usr/local/include/webrtc/*",
+                "/usr/local/include/webrtc/third_party/abseil-cpp/*",
+                "/usr/local/include/webrtc/third_party/libyuv/include/*",
+                "/usr/local/include/webrtc/tools/json_schema_compiler/*",
+                "/usr/include/boost/program_options/*",
+                "${workspaceFolder}/src"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "linux-clang-arm64"
+        }
+    ],
+    "version": 4
+}

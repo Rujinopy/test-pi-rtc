@@ -1,0 +1,96 @@
+#include "args.h"
+#include "capturer/v4l2_capturer.h"
+#include "v4l2_codecs/v4l2_encoder.h"
+
+#include <chrono>
+#include <condition_variable>
+#include <fcntl.h>
+#include <mutex>
+#include <string>
+#include <unistd.h>
+
+int main(int argc, char *argv[]) {
+    std::mutex mtx;
+    std::condition_variable cond_var;
+    bool is_finished = false;
+    bool has_first_keyframe_ = false;
+    int images_nb = 0;
+    int record_sec = 10;
+    Args args{.fps = 30,
+              .width = 1280,
+              .height = 960,
+              .hw_accel = true,
+              .format = V4L2_PIX_FMT_MJPEG,
+              .device = "/dev/video0"};
+
+    auto capturer = V4l2Capturer::Create(args);
+    auto observer = capturer->AsFrameBufferObservable();
+
+    auto encoder = V4l2Encoder::Create(args.width, args.height, true);
+
+    int cam_frame_count = 0;
+    auto cam_start_time = std::chrono::steady_clock::now();
+    int frame_count = 0;
+    auto start_time = std::chrono::steady_clock::now();
+
+    observer->Subscribe([&](rtc::scoped_refptr<V4l2FrameBuffer> frame_buffer) {
+        auto buffer = frame_buffer->GetRawBuffer();
+
+        if (frame_buffer->format() == V4L2_PIX_FMT_H264 && !has_first_keyframe_) {
+            if (buffer.flags & V4L2_BUF_FLAG_KEYFRAME) {
+                has_first_keyframe_ = true;
+            } else {
+                return;
+            }
+        }
+
+        auto cam_current_time = std::chrono::steady_clock::now();
+        cam_frame_count++;
+
+        if (std::chrono::duration_cast<std::chrono::seconds>(cam_current_time - cam_start_time)
+                .count() >= 1) {
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(cam_current_time -
+                                                                                  cam_start_time)
+                                .count();
+            double cam_current_fps = static_cast<double>(cam_frame_count) / (duration / 1000.0);
+            cam_start_time = cam_current_time;
+            printf("Camera FPS: %.2f\n", cam_current_fps);
+            cam_frame_count = 0;
+        }
+
+        encoder->EmplaceBuffer(buffer, [&](V4l2Buffer &encoded_buffer) {
+            if (is_finished) {
+                return;
+            }
+
+            auto current_time = std::chrono::steady_clock::now();
+            frame_count++;
+
+            if (std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time)
+                    .count() >= 1) {
+                auto duration =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time)
+                        .count();
+                double current_fps = static_cast<double>(frame_count) / (duration / 1000.0);
+                start_time = current_time;
+                printf("Codec FPS: %.2f\n", current_fps);
+                frame_count = 0;
+            }
+
+            if (images_nb++ > args.fps * record_sec) {
+                is_finished = true;
+                cond_var.notify_all();
+            }
+        });
+    });
+
+    std::unique_lock<std::mutex> lock(mtx);
+    cond_var.wait(lock, [&] {
+        return is_finished;
+    });
+
+    encoder.reset();
+    observer->UnSubscribe();
+
+    return 0;
+}
